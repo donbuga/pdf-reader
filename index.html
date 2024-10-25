@@ -43,7 +43,12 @@
             transition: background-color 0.2s;
         }
 
-        .toolbar button:hover {
+        .toolbar button:disabled {
+            background-color: #93c5fd;
+            cursor: not-allowed;
+        }
+
+        .toolbar button:hover:not(:disabled) {
             background-color: #1d4ed8;
         }
 
@@ -65,11 +70,11 @@
         .pdf-container {
             margin: 1rem auto;
             max-width: 1000px;
+            text-align: center;
         }
 
         #pdfCanvas {
-            display: block;
-            margin: 0 auto;
+            display: inline-block;
             background-color: white;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
@@ -79,6 +84,17 @@
             padding: 2rem;
             color: white;
             font-size: 1.2rem;
+        }
+
+        .fallback-container {
+            text-align: center;
+            padding: 1rem;
+        }
+
+        .fallback-container iframe {
+            width: 100%;
+            height: 80vh;
+            border: none;
         }
 
         @media (max-width: 768px) {
@@ -97,37 +113,48 @@
     <div class="header">
         <h1>Visor de PDF</h1>
     </div>
-    <div id="content">
-        <div class="toolbar">
-            <button id="prev">← Anterior</button>
-            <span>Página <span id="pageNum">0</span> de <span id="pageCount">0</span></span>
-            <button id="next">Siguiente →</button>
-            <button id="zoomOut">- Zoom</button>
-            <button id="zoomIn">+ Zoom</button>
-        </div>
-        <div class="pdf-container">
-            <canvas id="pdfCanvas"></canvas>
-        </div>
-    </div>
+    <div id="content"></div>
 
     <script>
-        // Configurar worker de PDF.js
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
         let pdfDoc = null;
         let pageNum = 1;
         let scale = 1.5;
-        const canvas = document.getElementById('pdfCanvas');
-        const ctx = canvas.getContext('2d');
-
+        
         function getQueryParam(param) {
             const urlParams = new URLSearchParams(window.location.search);
             return urlParams.get(param);
         }
 
+        function createToolbar() {
+            return `
+                <div class="toolbar">
+                    <button id="prev" disabled>← Anterior</button>
+                    <span>Página <span id="pageNum">0</span> de <span id="pageCount">0</span></span>
+                    <button id="next" disabled>Siguiente →</button>
+                    <button id="zoomOut">- Zoom</button>
+                    <button id="zoomIn">+ Zoom</button>
+                </div>
+                <div class="pdf-container">
+                    <canvas id="pdfCanvas"></canvas>
+                </div>
+            `;
+        }
+
+        function createFallbackViewer(url) {
+            return `
+                <div class="fallback-container">
+                    <iframe src="${url}" type="application/pdf"></iframe>
+                </div>
+            `;
+        }
+
         async function renderPage(num) {
             const page = await pdfDoc.getPage(num);
             const viewport = page.getViewport({ scale });
+            const canvas = document.getElementById('pdfCanvas');
+            const ctx = canvas.getContext('2d');
 
             canvas.height = viewport.height;
             canvas.width = viewport.width;
@@ -141,50 +168,68 @@
             
             document.getElementById('pageNum').textContent = num;
             
-            // Actualizar estado de los botones
             document.getElementById('prev').disabled = num <= 1;
             document.getElementById('next').disabled = num >= pdfDoc.numPages;
         }
 
         async function loadPDF(url) {
+            const content = document.getElementById('content');
+            content.innerHTML = createToolbar();
+
             try {
-                const loadingTask = pdfjsLib.getDocument(url);
+                // Intenta cargar el PDF usando fetch primero
+                const response = await fetch(url);
+                const pdfData = await response.arrayBuffer();
+                
+                const loadingTask = pdfjsLib.getDocument({data: pdfData});
                 pdfDoc = await loadingTask.promise;
                 
                 document.getElementById('pageCount').textContent = pdfDoc.numPages;
                 renderPage(pageNum);
+
+                // Configurar eventos después de cargar el PDF
+                setupEvents();
+
             } catch (error) {
-                content.innerHTML = `
-                    <div class="error-message">
-                        Error al cargar el PDF: ${error.message}
-                    </div>`;
+                console.error('Error al cargar el PDF:', error);
+                
+                // Intenta el plan B: cargar directamente en un iframe
+                try {
+                    content.innerHTML = createFallbackViewer(url);
+                } catch (fallbackError) {
+                    content.innerHTML = `
+                        <div class="error-message">
+                            No se pudo cargar el PDF. Por favor, verifica que la URL sea correcta y accesible.<br>
+                            Error: ${error.message}
+                        </div>`;
+                }
             }
         }
 
-        // Eventos de los botones
-        document.getElementById('prev').addEventListener('click', () => {
-            if (pageNum <= 1) return;
-            pageNum--;
-            renderPage(pageNum);
-        });
+        function setupEvents() {
+            document.getElementById('prev').addEventListener('click', () => {
+                if (pageNum <= 1) return;
+                pageNum--;
+                renderPage(pageNum);
+            });
 
-        document.getElementById('next').addEventListener('click', () => {
-            if (pageNum >= pdfDoc.numPages) return;
-            pageNum++;
-            renderPage(pageNum);
-        });
+            document.getElementById('next').addEventListener('click', () => {
+                if (pageNum >= pdfDoc.numPages) return;
+                pageNum++;
+                renderPage(pageNum);
+            });
 
-        document.getElementById('zoomIn').addEventListener('click', () => {
-            scale *= 1.2;
-            renderPage(pageNum);
-        });
+            document.getElementById('zoomIn').addEventListener('click', () => {
+                scale *= 1.2;
+                renderPage(pageNum);
+            });
 
-        document.getElementById('zoomOut').addEventListener('click', () => {
-            scale *= 0.8;
-            renderPage(pageNum);
-        });
+            document.getElementById('zoomOut').addEventListener('click', () => {
+                scale *= 0.8;
+                renderPage(pageNum);
+            });
+        }
 
-        // Inicializar
         window.onload = function() {
             const pdfUrl = getQueryParam('url');
             
