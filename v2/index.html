@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visor de Archivos</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background-color: #525659;
+        }
+        .toolbar {
+            background-color: #f3f4f6;
+            padding: 0.5rem;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 1rem;
+            position: sticky;
+            top: 0;
+        }
+        .toolbar button {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 0.25rem;
+            background-color: #2563eb;
+            color: white;
+            cursor: pointer;
+        }
+        .toolbar button:disabled {
+            background-color: #93c5fd;
+            cursor: not-allowed;
+        }
+        .pdf-container {
+            text-align: center;
+            margin: 1rem auto;
+        }
+        canvas {
+            background-color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .error {
+            background-color: #fee2e2;
+            color: #b91c1c;
+            padding: 1rem;
+            margin: 1rem;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+<div id="viewer"></div>
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+function getQueryParam(name) {
+    const match = new RegExp('[?&]' + name + '=([^&#]*)').exec(window.location.search);
+    return match ? decodeURIComponent(match[1].replace(/\+/g, ' ')) : null;
+}
+
+function toolbarTemplate() {
+    return `\n        <div class="toolbar">\n            <button id="prev" disabled>&larr;</button>\n            <span>Página <span id="pageNum">0</span> de <span id="pageCount">0</span></span>\n            <button id="next" disabled>&rarr;</button>\n            <button id="zoomOut">-</button>\n            <button id="zoomIn">+</button>\n        </div>\n        <div class="pdf-container">\n            <canvas id="canvas"></canvas>\n        </div>`;
+}
+
+async function renderPage(pdf, num, scale) {
+    const page = await pdf.getPage(num);
+    const viewport = page.getViewport({ scale });
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.height = viewport.height;
+    canvas.width = viewport.width;
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    document.getElementById('pageNum').textContent = num;
+    document.getElementById('prev').disabled = num <= 1;
+    document.getElementById('next').disabled = num >= pdf.numPages;
+}
+
+async function initViewer(url) {
+    const container = document.getElementById('viewer');
+    container.innerHTML = toolbarTemplate();
+    let pdf;
+    let page = 1;
+    let scale = 1.0;
+    try {
+        const data = await (await fetch(url)).arrayBuffer();
+        pdf = await pdfjsLib.getDocument({ data }).promise;
+        document.getElementById('pageCount').textContent = pdf.numPages;
+        await renderPage(pdf, page, scale);
+    } catch (err) {
+        console.error(err);
+        container.innerHTML = '<div class="error">Error al cargar el archivo.</div>';
+        return;
+    }
+
+    document.getElementById('prev').addEventListener('click', async () => {
+        if (page <= 1) return;
+        page--;
+        await renderPage(pdf, page, scale);
+    });
+
+    document.getElementById('next').addEventListener('click', async () => {
+        if (page >= pdf.numPages) return;
+        page++;
+        await renderPage(pdf, page, scale);
+    });
+
+    document.getElementById('zoomIn').addEventListener('click', async () => {
+        scale *= 1.2;
+        await renderPage(pdf, page, scale);
+    });
+
+    document.getElementById('zoomOut').addEventListener('click', async () => {
+        scale *= 0.8;
+        await renderPage(pdf, page, scale);
+    });
+}
+
+const url = getQueryParam('url');
+if (url) {
+    initViewer(url);
+} else {
+    document.getElementById('viewer').innerHTML = '<div class="error">Agregue la URL del archivo con ?url=</div>';
+}
+</script>
+</body>
+</html>
